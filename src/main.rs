@@ -9,6 +9,7 @@ use std::thread;
 use image::{GenericImageView, Rgba};
 use rand::Rng;
 use byteorder::{ByteOrder, LittleEndian};
+use clap::{arg, Command};
 
 #[derive(Clone)]
 struct Point {
@@ -132,7 +133,7 @@ fn generate_anchor_points(
 
     loop {
         match anchor_candidates.pop_front() {
-            None => { break }
+            None => { break; }
             Some(candidate) => {
                 let mut is_valid_anchor = true;
                 for anchor in &final_anchors {
@@ -195,10 +196,10 @@ fn pixel_calculator(
     pixels
 }
 
-fn read_anchor_points_from_file() -> std::io::Result<Vec<Point>> {
+fn read_anchor_points_from_file(anchors_cache_path: &str) -> std::io::Result<Vec<Point>> {
     let mut anchor_points: Vec<Point> = Vec::new();
 
-    let mut existing_anchor_file = File::open("~/Desktop/anchors")?;
+    let mut existing_anchor_file = File::open(anchors_cache_path)?;
 
     let mut buffer: [u8; 8] = [0; 8];
 
@@ -218,8 +219,8 @@ fn read_anchor_points_from_file() -> std::io::Result<Vec<Point>> {
     Ok(anchor_points)
 }
 
-fn write_anchor_points_to_file(anchor_points: Vec<Point>) -> std::io::Result<()> {
-    let mut anchor_file = File::create("~/Desktop/anchors")?;
+fn write_anchor_points_to_file(anchor_points: Vec<Point>, anchors_cache_path: &str) -> std::io::Result<()> {
+    let mut anchor_file = File::create(anchors_cache_path)?;
 
     let mut buffer = [0; 8];
 
@@ -240,72 +241,102 @@ fn write_anchor_points_to_file(anchor_points: Vec<Point>) -> std::io::Result<()>
 }
 
 fn main() {
-    let input_image = image::open("~/Desktop/painting-in.jpg").unwrap();
+    let arguments = Command::new("voronoi-painter")
+        .version("0.1.0")
+        .author("Varun Barad <varun@varunbarad.com>")
+        .about("CLI tool to convert an image to its voronoi diagram")
+        .args_override_self(true)
+        .arg(arg!(-i --input <VALUE>).required(true))
+        .arg(arg!(-o --output <VALUE>).required(true))
+        .arg(arg!(-a --anchors <VALUE>).required(false))
+        .get_matches();
 
-    let (image_width, image_height) = input_image.dimensions();
-
-    let minimum_distance = 10u32;
-    let anchor_points = match read_anchor_points_from_file() {
-        Ok(existing_anchor_points) => { existing_anchor_points }
-        Err(_) => {
-            let bounds = Bounds {
-                width: image_width as u64,
-                height: image_height as u64,
-            };
-
-            let anchor_points = generate_anchor_points(&bounds, minimum_distance);
-
-            match write_anchor_points_to_file(anchor_points.clone()) {
-                Ok(_) => {}
-                Err(_) => {}
-            }
-
-            anchor_points
+    match arguments.value_of("input") {
+        None => {
+            eprintln!("Path to input image not provided, please use the `--input <VALUE>` arg");
         }
-    };
+        Some(input_image_path) => {
+            match arguments.value_of("output") {
+                None => {
+                    eprint!("Path for output not provided, please use the `--output <VALUE>` arg");
+                }
+                Some(output_path) => {
+                    let input_image = image::open(input_image_path).unwrap();
 
-    let mut anchors: Vec<Anchor> = Vec::with_capacity(anchor_points.len());
-    for point in anchor_points {
-        let x = point.x as u32;
-        let y = point.y as u32;
-        anchors.push(Anchor {
-            point,
-            color: input_image.get_pixel(x, y),
-        });
-    }
+                    let (image_width, image_height) = input_image.dimensions();
 
-    println!("Generated {} anchor points", anchors.len());
+                    let minimum_distance = 10u32;
+                    let bounds = Bounds {
+                        width: image_width as u64,
+                        height: image_height as u64,
+                    };
 
-    let mut output_image_buffer = image::ImageBuffer::new(image_width, image_height);
+                    let anchor_points = match arguments.value_of("anchors") {
+                        None => {
+                            generate_anchor_points(&bounds, minimum_distance)
+                        }
+                        Some(anchors_cache_path) => {
+                            match read_anchor_points_from_file(anchors_cache_path) {
+                                Ok(existing_anchor_points) => { existing_anchor_points }
+                                Err(_) => {
+                                    let anchor_points = generate_anchor_points(&bounds, minimum_distance);
+                                    match write_anchor_points_to_file(anchor_points.clone(), anchors_cache_path) {
+                                        Ok(_) => {}
+                                        Err(_) => {}
+                                    }
 
-    for step in (0..image_width).step_by(10) {
-        let mut thread_pool = Vec::with_capacity(10);
-        for x in 0..10 {
-            if (x + step) >= image_width {
-                break;
-            } else {
-                let loop_anchors = anchors.clone();
-                let handle = thread::spawn(move || {
-                    pixel_calculator(x + step, image_height, loop_anchors, minimum_distance)
-                });
+                                    anchor_points
+                                }
+                            }
+                        }
+                    };
 
-                thread_pool.push(handle);
-            }
-        }
-
-        for thread in thread_pool {
-            match thread.join() {
-                Ok(pixels) => {
-                    for (coordinates, color) in pixels {
-                        output_image_buffer.put_pixel(coordinates.x as u32, coordinates.y as u32, color);
+                    let mut anchors: Vec<Anchor> = Vec::with_capacity(anchor_points.len());
+                    for point in anchor_points {
+                        let x = point.x as u32;
+                        let y = point.y as u32;
+                        anchors.push(Anchor {
+                            point,
+                            color: input_image.get_pixel(x, y),
+                        });
                     }
-                }
-                Err(message) => {
-                    panic::resume_unwind(message);
+
+                    println!("Generated {} anchor points", anchors.len());
+
+                    let mut output_image_buffer = image::ImageBuffer::new(image_width, image_height);
+
+                    for step in (0..image_width).step_by(10) {
+                        let mut thread_pool = Vec::with_capacity(10);
+                        for x in 0..10 {
+                            if (x + step) >= image_width {
+                                break;
+                            } else {
+                                let loop_anchors = anchors.clone();
+                                let handle = thread::spawn(move || {
+                                    pixel_calculator(x + step, image_height, loop_anchors, minimum_distance)
+                                });
+
+                                thread_pool.push(handle);
+                            }
+                        }
+
+                        for thread in thread_pool {
+                            match thread.join() {
+                                Ok(pixels) => {
+                                    for (coordinates, color) in pixels {
+                                        output_image_buffer.put_pixel(coordinates.x as u32, coordinates.y as u32, color);
+                                    }
+                                }
+                                Err(message) => {
+                                    panic::resume_unwind(message);
+                                }
+                            }
+                        }
+                    }
+
+                    output_image_buffer.save(output_path).unwrap();
                 }
             }
         }
     }
-
-    output_image_buffer.save("~/Desktop/painting-out.png").unwrap();
 }
