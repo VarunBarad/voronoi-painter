@@ -1,15 +1,15 @@
 extern crate core;
 
+use byteorder::{ByteOrder, LittleEndian};
+use clap::{arg, Command};
+use image::{GenericImageView, Rgba};
+use rand::Rng;
 use std::collections::VecDeque;
 use std::f64::consts::PI;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::panic;
 use std::thread;
-use image::{GenericImageView, Rgba};
-use rand::Rng;
-use byteorder::{ByteOrder, LittleEndian};
-use clap::{arg, Command};
 
 #[derive(Clone)]
 struct Point {
@@ -25,7 +25,11 @@ impl Point {
         horizontal_distance + vertical_distance
     }
 
-    fn closest_anchor(&self, anchors: &Vec<Anchor>, minimum_distance_between_anchors: u32) -> Option<Anchor> {
+    fn closest_anchor(
+        &self,
+        anchors: &Vec<Anchor>,
+        minimum_distance_between_anchors: u32,
+    ) -> Option<Anchor> {
         let x = (minimum_distance_between_anchors as f64) / 2f64;
         let x = x * x;
 
@@ -76,7 +80,8 @@ fn random_point_at_certain_distance_from_given_point(
     let mut rng = rand::thread_rng();
 
     let angle = rng.gen::<f64>() * (2f64 * PI);
-    let actual_distance = (distance.minimum as f64) + (rng.gen::<f64>() * ((distance.maximum - distance.minimum) as f64));
+    let actual_distance = (distance.minimum as f64)
+        + (rng.gen::<f64>() * ((distance.maximum - distance.minimum) as f64));
 
     let point = Point {
         x: (actual_distance * angle.cos()) + source_point.x,
@@ -101,16 +106,17 @@ fn generate_anchor_candidates(
     let mut candidates = Vec::with_capacity(25);
 
     for _ in 0..25 {
-        candidates.push(random_point_at_certain_distance_from_given_point(source_point, distance, bounds));
+        candidates.push(random_point_at_certain_distance_from_given_point(
+            source_point,
+            distance,
+            bounds,
+        ));
     }
 
     candidates
 }
 
-fn generate_anchor_points(
-    bounds: &Bounds,
-    minimum_distance: u32,
-) -> Vec<Point> {
+fn generate_anchor_points(bounds: &Bounds, minimum_distance: u32) -> Vec<Point> {
     let mut rng = rand::thread_rng();
 
     let squared_minimum_distance = minimum_distance * minimum_distance;
@@ -133,11 +139,14 @@ fn generate_anchor_points(
 
     loop {
         match anchor_candidates.pop_front() {
-            None => { break; }
+            None => {
+                break;
+            }
             Some(candidate) => {
                 let mut is_valid_anchor = true;
                 for anchor in &final_anchors {
-                    if anchor.squared_distance_from(&candidate) < (squared_minimum_distance as f64) {
+                    if anchor.squared_distance_from(&candidate) < (squared_minimum_distance as f64)
+                    {
                         is_valid_anchor = false;
                         break;
                     }
@@ -149,7 +158,8 @@ fn generate_anchor_points(
                     match final_anchors.last() {
                         None => {}
                         Some(source) => {
-                            anchor_candidates.extend(generate_anchor_candidates(source, &distance, bounds));
+                            anchor_candidates
+                                .extend(generate_anchor_candidates(source, &distance, bounds));
                         }
                     }
                 }
@@ -171,7 +181,9 @@ fn pixel_calculator(
     let mut filtered_anchors: Vec<Anchor> = Vec::with_capacity(anchors.len());
 
     for anchor in anchors {
-        if (anchor.point.x > (((x as i64) - (minimum_distance_between_anchors as i64)) as f64)) && (anchor.point.x < (((x as i64) + (minimum_distance_between_anchors as i64)) as f64)) {
+        if (anchor.point.x > (((x as i64) - (minimum_distance_between_anchors as i64)) as f64))
+            && (anchor.point.x < (((x as i64) + (minimum_distance_between_anchors as i64)) as f64))
+        {
             filtered_anchors.push(anchor);
         }
     }
@@ -181,7 +193,8 @@ fn pixel_calculator(
             x: x as f64,
             y: y as f64,
         };
-        let closest_anchor = point.closest_anchor(&filtered_anchors, minimum_distance_between_anchors);
+        let closest_anchor =
+            point.closest_anchor(&filtered_anchors, minimum_distance_between_anchors);
         // let closest_anchor = point.closest_anchor(&anchors, minimum_distance_between_anchors);
         match closest_anchor {
             None => {}
@@ -205,12 +218,16 @@ fn read_anchor_points_from_file(anchors_cache_path: &str) -> std::io::Result<Vec
 
     loop {
         let x = match existing_anchor_file.read_exact(&mut buffer) {
-            Ok(_) => { LittleEndian::read_f64(&buffer) }
-            Err(_) => { break; }
+            Ok(_) => LittleEndian::read_f64(&buffer),
+            Err(_) => {
+                break;
+            }
         };
         let y = match existing_anchor_file.read_exact(&mut buffer) {
-            Ok(_) => { LittleEndian::read_f64(&buffer) }
-            Err(_) => { break; }
+            Ok(_) => LittleEndian::read_f64(&buffer),
+            Err(_) => {
+                break;
+            }
         };
 
         anchor_points.push(Point { x, y });
@@ -219,7 +236,10 @@ fn read_anchor_points_from_file(anchors_cache_path: &str) -> std::io::Result<Vec
     Ok(anchor_points)
 }
 
-fn write_anchor_points_to_file(anchor_points: Vec<Point>, anchors_cache_path: &str) -> std::io::Result<()> {
+fn write_anchor_points_to_file(
+    anchor_points: Vec<Point>,
+    anchors_cache_path: &str,
+) -> std::io::Result<()> {
     let mut anchor_file = File::create(anchors_cache_path)?;
 
     let mut buffer = [0; 8];
@@ -246,17 +266,22 @@ fn main() {
         .author("Varun Barad <varun@varunbarad.com>")
         .about("CLI tool to convert an image to its voronoi diagram")
         .args_override_self(true)
-        .arg(arg!(-i --input <VALUE>).required(true))
-        .arg(arg!(-o --output <VALUE>).required(true))
-        .arg(arg!(-a --anchors <VALUE>).required(false))
+        .subcommand_required(true)
+        .subcommand(
+            Command::new("painting")
+                .about("Convert a painting to its voronoi diagram")
+                .arg(arg!(-i --input <VALUE>).required(true))
+                .arg(arg!(-o --output <VALUE>).required(true))
+                .arg(arg!(-a --anchors <VALUE>).required(false)),
+        )
         .get_matches();
 
-    match arguments.value_of("input") {
-        None => {
-            eprintln!("Path to input image not provided, please use the `--input <VALUE>` arg");
-        }
-        Some(input_image_path) => {
-            match arguments.value_of("output") {
+    match arguments.subcommand() {
+        Some(("painting", sub_matches)) => match sub_matches.value_of("input") {
+            None => {
+                eprintln!("Path to input image not provided, please use the `--input <VALUE>` arg");
+            }
+            Some(input_image_path) => match sub_matches.value_of("output") {
                 None => {
                     eprint!("Path for output not provided, please use the `--output <VALUE>` arg");
                 }
@@ -271,16 +296,18 @@ fn main() {
                         height: image_height as u64,
                     };
 
-                    let anchor_points = match arguments.value_of("anchors") {
-                        None => {
-                            generate_anchor_points(&bounds, minimum_distance)
-                        }
+                    let anchor_points = match sub_matches.value_of("anchors") {
+                        None => generate_anchor_points(&bounds, minimum_distance),
                         Some(anchors_cache_path) => {
                             match read_anchor_points_from_file(anchors_cache_path) {
-                                Ok(existing_anchor_points) => { existing_anchor_points }
+                                Ok(existing_anchor_points) => existing_anchor_points,
                                 Err(_) => {
-                                    let anchor_points = generate_anchor_points(&bounds, minimum_distance);
-                                    match write_anchor_points_to_file(anchor_points.clone(), anchors_cache_path) {
+                                    let anchor_points =
+                                        generate_anchor_points(&bounds, minimum_distance);
+                                    match write_anchor_points_to_file(
+                                        anchor_points.clone(),
+                                        anchors_cache_path,
+                                    ) {
                                         Ok(_) => {}
                                         Err(_) => {}
                                     }
@@ -303,7 +330,8 @@ fn main() {
 
                     println!("Generated {} anchor points", anchors.len());
 
-                    let mut output_image_buffer = image::ImageBuffer::new(image_width, image_height);
+                    let mut output_image_buffer =
+                        image::ImageBuffer::new(image_width, image_height);
 
                     for step in (0..image_width).step_by(10) {
                         let mut thread_pool = Vec::with_capacity(10);
@@ -313,7 +341,12 @@ fn main() {
                             } else {
                                 let loop_anchors = anchors.clone();
                                 let handle = thread::spawn(move || {
-                                    pixel_calculator(x + step, image_height, loop_anchors, minimum_distance)
+                                    pixel_calculator(
+                                        x + step,
+                                        image_height,
+                                        loop_anchors,
+                                        minimum_distance,
+                                    )
                                 });
 
                                 thread_pool.push(handle);
@@ -324,7 +357,11 @@ fn main() {
                             match thread.join() {
                                 Ok(pixels) => {
                                     for (coordinates, color) in pixels {
-                                        output_image_buffer.put_pixel(coordinates.x as u32, coordinates.y as u32, color);
+                                        output_image_buffer.put_pixel(
+                                            coordinates.x as u32,
+                                            coordinates.y as u32,
+                                            color,
+                                        );
                                     }
                                 }
                                 Err(message) => {
@@ -336,7 +373,10 @@ fn main() {
 
                     output_image_buffer.save(output_path).unwrap();
                 }
-            }
+            },
+        },
+        _ => {
+            eprintln!("No known sub-command found");
         }
     }
 }
