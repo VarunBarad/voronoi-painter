@@ -195,7 +195,6 @@ fn pixel_calculator(
         };
         let closest_anchor =
             point.closest_anchor(&filtered_anchors, minimum_distance_between_anchors);
-        // let closest_anchor = point.closest_anchor(&anchors, minimum_distance_between_anchors);
         match closest_anchor {
             None => {}
             Some(anchor) => {
